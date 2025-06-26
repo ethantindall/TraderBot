@@ -129,55 +129,53 @@ if st.session_state['TEST_MODE'] == False:
 
 
 # ----------- SHOW HISTORICAL DATA FOR SELECT TOKENS --------------
+st.write("Show chart for last:")
+timeframe = st.selectbox("Select timeframe", ("1h", "1d", "7d", "30d", "365d"))
 
-symbols = ['ETH/USD','BTC/USD', 'USDT/USD']
-ticker = st.session_state['binance'].fetchTickers(symbols)
+# Define duration in milliseconds for each timeframe
+timeframe_durations = {
+    "1h": 1 * 60 * 60 * 1000,
+    "1d": 1 * 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+    "365d": 365 * 24 * 60 * 60 * 1000,
+}
+
+symbols = ['ETH/USDT', 'BTC/USDT', 'USDT/USD']
+ticker = st.session_state['binance'].fetch_tickers(symbols)
+
 for symbol, data in ticker.items():
-    st.header(symbol + ": $" + str(data['last']))
+    st.header(f"{symbol}: ${data['last']}")
     with st.expander("Line Chart"):
-        timeframe="1h"
-        # in last 7 days
-        since = st.session_state['binance'].milliseconds() - 1* 24 * 60 * 60 * 1000
-        ohlcv = st.session_state['binance'].fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=1440)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        st.line_chart(df, x="timestamp", y="close")
+        since = st.session_state['binance'].milliseconds() - timeframe_durations[timeframe]
+        try:
+            ohlcv = st.session_state['binance'].fetch_ohlcv(symbol, timeframe='1h', since=since)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            st.line_chart(df.set_index('timestamp')['close'])
+        except Exception as e:
+            st.error(f"Failed to fetch data for {symbol}: {e}")
 
 
 with st.sidebar:
-    token = st.selectbox("Select token to buy", ("SHIB", "ETH", "BTC"), index=None, placeholder="Select Token")
-    bot_running = st.toggle("TURN BOT ON", value=st.session_state['bot_running'])
-    
-
-    #####################################
-    symbol = 'ETH/USDT'
-    timeframe = '1h'
-    lookback_candles = 24  # use past 24 hours
-    buy_threshold = -0.01  # -1%
-    sell_threshold = 0.01  # +1%
-    usd_balance = 100  # you could fetch this dynamically
-    holding_token = False
-
-    if bot_running != st.session_state['bot_running']:
-        st.session_state['bot_running'] = bot_running
-
-    if st.session_state['bot_running']:
-        ticker = st.session_state['binance'].fetch_ticker(f'{token}/USDT')
-        price = ticker['last']
-        
-        #check to see if funds are available
-        if st.session_state['usdt_balance'] > 1 and price <= st.session_state['last_buy_point']*.98 or st.session_state['last_buy_point'] ==0:
-            #if funds available, buy token
+    token = st.selectbox("Select token to buy", ("SHIB/USDT", "ETH/USDT", "BTC/USDT"), index=None, placeholder="Select Token")
+    trading_algo = st.selectbox("Select your trading algorithm",("Mean Reversion"), index=None, placeholder="Select Token")
+    if trading_algo == "Mean Reversion":
+        days = st.number_input("Find average price from the last X days.")
+        if st.button("Find average price"):
+            # find the average cost of token over average_price
             try:
-                buy(token, st.session_state['usdt_balance'])
+                since = int(st.session_state['binance'].milliseconds() - days * 24 * 60 * 60 * 1000)
+                # Fetch OHLCV data using 1h candles
+                ohlcv = st.session_state['binance'].fetch_ohlcv(token, timeframe='1h', since=since)
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                avg_close = df['close'].mean()
+                st.success(f"Average closing price of {token} over last {days} days: **${avg_close:.8f}**")
             except Exception as e:
-                st.error(f"ERROR: {e}")
+                st.error(f"Error fetching data for {token}: {e}")
 
-        balance = st.session_state['binance'].fetch_balance()
-        token_balance = balance['free'].get(token, 0)
-
-        if price >= st.session_state['last_buy_point'] * 1.012 and token_balance > 0.0001:
-            sell(token)
-        time.sleep(60)
-        st.rerun()
-    
+        buy_range = st.number_input("Buy/Sell if price diverges by X%:")
+        bot_running = st.toggle("TURN BOT ON", value=st.session_state['bot_running'])
+        if bot_running:
+            st.success("Bot Running")
